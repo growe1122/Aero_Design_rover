@@ -10,17 +10,17 @@ const int chArm2Pin = 5;      // manipulator servo 2
 const int chBoxPin = 6;       // storage box servo
 
 //motor driver pins (example)
-const int PWM_FL = 3, DIR_FL = 4;
-const int PWM_FR = 5, DIR_FR = 6;
-const int PWM_BL = 9, DIR_BL = 8;
-const int PWM_BR = 10, DIR_BR = 11;
+const int PWM_FL = 7, DIR_FL = 8;
+const int PWM_FR = 9, DIR_FR = 10;
+const int PWM_BL = 11, DIR_BL = 12;
+const int PWM_BR = 13, DIR_BR = 14;
 
 // servos
 Servo armServo1;
 Servo armServo2;
 Servo storageServo;
 
-// --- Helper to map RC pulse width to speed / servo angle ---
+// --- Helpers
 int pulseToSpeed(int pulse) {
   // Assuming 1000-2000 µs mapping to -255…+255
   int speed = map(pulse, 1000, 2000, -255, 255);
@@ -32,6 +32,10 @@ int pulseToServoAngle(int pulse) {
   int ang = map(pulse, 1000, 2000, 0, 180);
   ang = constrain(ang, 0, 180);
   return ang;
+}
+ // Applying deadband to ignore small input noise
+int applyDeadband(int val, int db = 20) {
+  return (abs(val) < db) ? 0 : val;
 }
 
 // Motor drive function
@@ -67,17 +71,22 @@ void setup() {
 
 void loop() {
   // Read pulse widths
-  int throttlePulse = pulseIn(chThrottlePin, HIGH, 30000);
+  int throttlePulse = pulseIn(chThrottlePin, HIGH, 25000);
   int steerPulse = pulseIn(chSteeringPin, HIGH, 30000);
   int arm1Pulse = pulseIn(chArm1Pin, HIGH, 30000);
   int arm2Pulse = pulseIn(chArm2Pin, HIGH, 30000);
   int boxPulse = pulseIn(chBoxPin, HIGH, 30000);
 
-  // Convert to control values
-  int driveVal = pulseToSpeed(throttlePulse);
-  int steerVal = pulseToSpeed(steerPulse);
+  // Failsafe 
+  if (throttlePulse == 0 || steerPulse == 0) {
+    driveAll(0, 0);
+    return;
+  }
 
-  // For drive: use differential drive
+  // Drive control
+  int driveVal = applyDeadband(pulseToSpeed(throttlePulse));
+  int steerVal = applyDeadband(pulseToSpeed(steerPulse));
+
   int leftSpeed = driveVal + steerVal;
   int rightSpeed = driveVal - steerVal;
   leftSpeed = constrain(leftSpeed, -255, 255);
@@ -86,14 +95,25 @@ void loop() {
   driveAll(leftSpeed, rightSpeed);
 
   // Manipulator control
-  int a1Angle = pulseToServoAngle(arm1Pulse);
-  int a2Angle = pulseToServoAngle(arm2Pulse);
-  armServo1.write(a1Angle);
-  armServo2.write(a2Angle);
+  if (arm1Pulse > 0) armServo1.write(pulseToServoAngle(arm1Pulse));
+  if (arm2Pulse > 0) armServo2.write(pulseToServoAngle(arm2Pulse));
+  if (boxPulse > 0) storageServo.write(pulseToServoAngle(boxPulse));
 
-  // Storage box
-  int boxAngle = pulseToServoAngle(boxPulse);
-  storageServo.write(boxAngle);
+  // --- Debug output ---
+  Serial.print("Thr: "); Serial.print(throttlePulse);
+  Serial.print(" | Str: "); Serial.print(steerPulse);
+  Serial.print(" | A1: "); Serial.print(arm1Pulse);
+  Serial.print(" | A2: "); Serial.print(arm2Pulse);
+  Serial.print(" | Box: "); Serial.println(boxPulse);
+
+  driveVal = applyDeadband(driveVal);
+  steerVal = applyDeadband(steerVal);
+
+  // Failsafe handling 
+  if (throttlePulse == 0 || steerPulse == 0) {
+  driveAll(0, 0); // stop if lost signal
+  return;
+  }
 
   // Debug output
   Serial.print("Thr: "); Serial.print(throttlePulse);
